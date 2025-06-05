@@ -1,121 +1,36 @@
+#define _GNU_SOURCE
+#include <malloc.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <malloc_np.h>
-#include <time.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/wait.h>
 
-#define NUM_BLOCKS 100000
-#define MAX_SIZE 512
+void allocate_memory() {
+    char *arr[1000];
 
-void run_test(unsigned num_arenas) {
-    // Створюємо масив арен
-    unsigned *arenas = malloc(num_arenas * sizeof(unsigned));
-    if (!arenas) {
-        perror("malloc arenas array");
-        exit(1);
-    }
-
-    // Створюємо нові арени
-    for (int i = 0; i < num_arenas; i++) {
-        size_t arena_index_size = sizeof(unsigned);
-        int ret = mallctl("arenas.create", &arenas[i], &arena_index_size, NULL, 0);
-        if (ret != 0) {
-            fprintf(stderr, "Failed to create arena %d: %s\n", i, strerror(ret));
-            exit(1);
+    for (int i = 0; i < 1000; ++i) {
+        arr[i] = malloc(1024);  // allocate 1KB
+        if (arr[i] != NULL) {
+            memset(arr[i], 0, 1024);
         }
     }
 
-    void* blocks[NUM_BLOCKS] = {0};
-    size_t sizes[NUM_BLOCKS];
-    srand(time(NULL) ^ getpid()); // Унікальний seed для кожного процесу
-
-    // Виділяємо пам'ять через різні арени
-    for (int i = 0; i < NUM_BLOCKS; i++) {
-        sizes[i] = rand() % MAX_SIZE + 1;
-        
-        // Вибираємо випадкову арену
-        unsigned arena_index = arenas[rand() % num_arenas];
-        
-        // Встановлюємо арену для поточного потоку
-        int set_ret = mallctl("thread.arena", NULL, NULL, &arena_index, sizeof(arena_index)); // Змінено ім'я змінної
-        if (set_ret != 0) { // Виправлено тут
-            fprintf(stderr, "Failed to set arena: %s\n", strerror(set_ret)); // Виправлено тут
-            exit(1);
-        }
-        
-        blocks[i] = malloc(sizes[i]);
-        if (!blocks[i]) {
-            perror("malloc");
-            exit(1);
-        }
+    for (int i = 0; i < 1000; i += 2) {
+        free(arr[i]);  // free half of them
     }
-
-    // Звільняємо кожен другий блок
-    for (int i = 0; i < NUM_BLOCKS; i += 2) {
-        free(blocks[i]);
-        blocks[i] = NULL;
-    }
-
-    // Збираємо статистику
-    size_t allocated, active, resident;
-    size_t len = sizeof(size_t);
-    
-    // Оновлюємо статистичні дані
-    unsigned epoch = 1;
-    mallctl("epoch", NULL, NULL, &epoch, sizeof(epoch));
-
-    mallctl("stats.allocated", &allocated, &len, NULL, 0);
-    mallctl("stats.active", &active, &len, NULL, 0);
-    mallctl("stats.resident", &resident, &len, NULL, 0);
-
-    printf("\nConfiguration: arenas = %u\n", num_arenas);
-    printf("Allocated: %zu bytes\n", allocated);
-    printf("Active:    %zu bytes\n", active);
-    printf("Resident:  %zu bytes\n", resident);
-    printf("Fragmentation (active - allocated): %zu bytes\n", active - allocated);
-    printf("Fragmentation percentage: %.2f%%\n", 
-           (double)(active - allocated) * 100.0 / active);
-
-    // Звільняємо пам'ять
-    for (int i = 0; i < NUM_BLOCKS; i++) {
-        if (blocks[i]) free(blocks[i]);
-    }
-    
-    free(arenas);
 }
 
 int main() {
-    printf("Memory Fragmentation Test on FreeBSD\n");
-    printf("====================================\n");
-    printf("Testing different arena configurations...\n");
-
-    unsigned arenas_config[] = {1, 2, 4, 8};
-    size_t num_configs = sizeof(arenas_config)/sizeof(arenas_config[0]);
-    
-    for (int i = 0; i < num_configs; i++) {
-        pid_t pid = fork();
-        
-        if (pid == 0) {
-            // Дочірній процес
-            printf("\nTest %d/%d starting (PID %d)...\n", i+1, num_configs, getpid());
-            run_test(arenas_config[i]);
-            printf("Test %d/%d completed (PID %d)\n", i+1, num_configs, getpid());
-            exit(0);
-        } else if (pid > 0) {
-            // Батьківський процес
-            int status;
-            waitpid(pid, &status, 0);
-            if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-                fprintf(stderr, "Test %d failed with status %d\n", i+1, WEXITSTATUS(status));
-            }
-        } else {
-            perror("fork");
-            exit(1);
-        }
+    // Set M_TOP_PAD to 0 to reduce top padding (less fragmentation)
+    if (!mallopt(M_TOP_PAD, 0)) {
+        printf("mallopt failed to set M_TOP_PAD\n");
+    } else {
+        printf("mallopt successfully set M_TOP_PAD\n");
     }
-    
-    printf("\nAll tests completed successfully!\n");
+
+    allocate_memory();
+
+    // Print malloc info to check fragmentation
+    malloc_stats();
+
     return 0;
 }
