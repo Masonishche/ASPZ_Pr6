@@ -10,13 +10,14 @@
 #define MAX_SIZE 512
 
 void run_test(unsigned num_arenas) {
-   
+    // Створюємо масив арен
     unsigned *arenas = malloc(num_arenas * sizeof(unsigned));
     if (!arenas) {
         perror("malloc arenas array");
         exit(1);
     }
 
+    // Створюємо нові арени
     for (int i = 0; i < num_arenas; i++) {
         size_t arena_index_size = sizeof(unsigned);
         int ret = mallctl("arenas.create", &arenas[i], &arena_index_size, NULL, 0);
@@ -28,15 +29,19 @@ void run_test(unsigned num_arenas) {
 
     void* blocks[NUM_BLOCKS] = {0};
     size_t sizes[NUM_BLOCKS];
-    srand(time(NULL) ^ getpid()); 
+    srand(time(NULL) ^ getpid()); // Унікальний seed для кожного процесу
 
+    // Виділяємо пам'ять через різні арени
     for (int i = 0; i < NUM_BLOCKS; i++) {
         sizes[i] = rand() % MAX_SIZE + 1;
         
+        // Вибираємо випадкову арену
         unsigned arena_index = arenas[rand() % num_arenas];
         
-        if (mallctl("thread.arena", NULL, NULL, &arena_index, sizeof(arena_index))) {
-            fprintf(stderr, "Failed to set arena: %s\n", strerror(ret));
+        // Встановлюємо арену для поточного потоку
+        int set_ret = mallctl("thread.arena", NULL, NULL, &arena_index, sizeof(arena_index)); // Змінено ім'я змінної
+        if (set_ret != 0) { // Виправлено тут
+            fprintf(stderr, "Failed to set arena: %s\n", strerror(set_ret)); // Виправлено тут
             exit(1);
         }
         
@@ -47,14 +52,17 @@ void run_test(unsigned num_arenas) {
         }
     }
 
+    // Звільняємо кожен другий блок
     for (int i = 0; i < NUM_BLOCKS; i += 2) {
         free(blocks[i]);
         blocks[i] = NULL;
     }
 
+    // Збираємо статистику
     size_t allocated, active, resident;
     size_t len = sizeof(size_t);
     
+    // Оновлюємо статистичні дані
     unsigned epoch = 1;
     mallctl("epoch", NULL, NULL, &epoch, sizeof(epoch));
 
@@ -70,6 +78,7 @@ void run_test(unsigned num_arenas) {
     printf("Fragmentation percentage: %.2f%%\n", 
            (double)(active - allocated) * 100.0 / active);
 
+    // Звільняємо пам'ять
     for (int i = 0; i < NUM_BLOCKS; i++) {
         if (blocks[i]) free(blocks[i]);
     }
@@ -89,12 +98,13 @@ int main() {
         pid_t pid = fork();
         
         if (pid == 0) {
-           
+            // Дочірній процес
             printf("\nTest %d/%d starting (PID %d)...\n", i+1, num_configs, getpid());
             run_test(arenas_config[i]);
             printf("Test %d/%d completed (PID %d)\n", i+1, num_configs, getpid());
             exit(0);
         } else if (pid > 0) {
+            // Батьківський процес
             int status;
             waitpid(pid, &status, 0);
             if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
